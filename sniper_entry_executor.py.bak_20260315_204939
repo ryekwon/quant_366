@@ -1,0 +1,340 @@
+import json
+import math
+import os
+import time
+import threading
+from datetime import datetime
+from xtquant import xtdata, xtconstant
+from quant_logger import record_action
+from xtquant.xttrader import XtQuantTrader, XtQuantTraderCallback
+import random
+import calendar
+from dotenv import load_dotenv
+import requests
+import sys
+
+# 🛡️ 解决 Windows 控制台打印 Emoji 导致的 UnicodeEncodeError
+if sys.stdout.encoding.lower() != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except AttributeError:
+        # 兼容旧版本 Python 3.6
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+load_dotenv()
+N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL")
+
+def send_n8n_alert(title, message):
+    if not N8N_WEBHOOK_URL: return
+    try:
+        payload = {"title": title, "message": message, "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")}
+        # POST 隐式传递 JSON
+        requests.post(N8N_WEBHOOK_URL, json=payload, timeout=10)
+    except Exception:
+        pass
+
+# 物理路径配置
+TARGETS_FILE = r"Z:\QuantpC_Workspace\Quant_Pilot\.state\sniper_targets.json"
+HOLDINGS_FILE = r"Z:\QuantpC_Workspace\Quant_Pilot\.state\sniper_holdings.json"
+SNIPER_TOTAL_CAPITAL = 50000  # 绝对火力上限：5万元
+TARGET_COUNT = 2             # 目标龙一、龙二
+
+
+def acquire_lock_with_ttl(lock_path, max_age_seconds=600):
+    """带 TTL 的自愈型进程锁。默认 600 秒 (10 分钟) 超时。"""
+    if os.path.exists(lock_path):
+        file_age = time.time() - os.path.getmtime(lock_path)
+        if file_age > max_age_seconds:
+            print(f"⚠️ [系统自愈] 发现残留孤儿锁 ({file_age:.1f}秒前)。强行粉碎并接管控制权...")
+            try:
+                os.remove(lock_path)
+            except OSError: pass
+        else:
+            print(f"🚫 [并发拦截] 进程锁生效中 (存活 {file_age:.1f}秒)，本次调度自动静默退让。")
+            return False
+    try:
+        with open(lock_path, 'w') as f: f.write(str(os.getpid()))
+        return True
+    except: return False
+
+def release_lock(lock_path):
+    if os.path.exists(lock_path):
+        try: os.remove(lock_path)
+        except OSError: pass
+
+def safe_execute_and_lock(xt_trader, acc, code, order_type, qty, price, strategy_name, order_remark):
+    """原子化下单封装（移除即时落盘，改为回调落盘）"""
+    try:
+        res = xt_trader.order_stock(acc, code, order_type, qty, xtconstant.FIX_PRICE, price, strategy_name, order_remark)
+        return res
+    except Exception as e:
+        print(f"❌ Execution Critical Error: {e}")
+        return -1
+
+def _write_holding(code, name, buy_price, buy_qty, filled_price, filled_qty):
+    """真实成交后，将记录写入底仓账本。"""
+    holdings = {}
+    if os.path.exists(HOLDINGS_FILE):
+        try:
+            with open(HOLDINGS_FILE, 'r', encoding='utf-8') as f:
+                holdings = json.load(f)
+        except:
+            holdings = {}
+    holdings[code] = {
+        "name": name,
+        "buy_price": filled_price,   # 使用真实成交价
+        "qty": filled_qty,           # 使用真实成交量
+        "ordered_price": buy_price,
+        "ordered_qty": buy_qty,
+        "date": datetime.now().strftime("%Y-%m-%d")
+    }
+    with open(HOLDINGS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(holdings, f, ensure_ascii=False, indent=4)
+    print(f"✅ [{code}] 真实成交已入账：{filled_qty}股 @ {filled_price}")
+
+
+def is_trading_safe_zone():
+    """
+    周末效应避险 + 月末流动性枯竭避险
+    """
+    now = datetime.now()
+    
+    # 防线 1：周末效应避险 (周五绝对不买，weekday=4为周五)
+    if now.weekday() == 4:
+        print("🛑 周末避险协议触发：今日为周五，Sniper 空仓过周末。")
+        return False
+        
+    # 防线 2：月末流动性枯竭避险 (月底最后 2 天绝对不买)
+    # 计算当前月的总天数
+    _, last_day_of_month = calendar.monthrange(now.year, now.month)
+    days_to_eom = last_day_of_month - now.day
+    
+    if days_to_eom <= 2: # 包含最后一天，倒数第二天，倒数第三天 (视具体定义)
+        print(f"🛑 月末避险协议触发：距离月末仅剩 {days_to_eom} 天，流动性极度枯竭，Sniper 强制休战。")
+        return False
+        
+    return True
+
+
+# ─── 维护一个全局状态，用于追踪待确认订单 ───────────────────────
+PENDING_ORDERS = {}  # { order_id: { 'code': code, 'name': name, 'qty': qty, 'price': price, 'status': 'pending' } }
+
+# ─── 交易所回调：监听真实委托结果 ────────────────────────────────
+class SniperCallback(XtQuantTraderCallback):
+    """
+    捕获交易所真实回报：
+    - on_order_stock: 报单确认
+    - on_stock_trade/on_order_stock_transaction: 成交回报（真正买入成功）
+    - on_order_error: 委托被拒（超涨跌停、资金不足等）
+    """
+    def on_order_stock(self, response):
+        """报单推送"""
+        oid = response.order_id
+        if oid in PENDING_ORDERS:
+            print(f"📝 [Sniper 报单确认] {PENDING_ORDERS[oid]['name']}({PENDING_ORDERS[oid]['code']}) | 状态: {response.order_status}")
+
+    def on_stock_trade(self, response):
+        """成交部分/全部推送。"""
+        oid = response.order_id
+        if oid not in PENDING_ORDERS:
+            return
+
+        code = PENDING_ORDERS[oid]['code']
+        name = PENDING_ORDERS[oid]['name']
+        filled_price = response.traded_price
+        filled_qty = response.traded_volume
+        
+        # 🛡️ 优先落盘账本
+        _write_holding(code, name, PENDING_ORDERS[oid]['price'], PENDING_ORDERS[oid]['qty'], filled_price, filled_qty)
+        
+        msg = (
+            f"✅ [Sniper 真实成交]\n"
+            f"目标: {name}({code})\n"
+            f"成交价: {filled_price}  成交量: {filled_qty}\n"
+            f"委托价: {PENDING_ORDERS[oid]['price']}  委托量: {PENDING_ORDERS[oid]['qty']}\n"
+            f"订单号: {oid}"
+        )
+        print(msg)
+        send_n8n_alert("✅ Sniper 进场成功", msg)
+        record_action(strategy="Sniper", action="买入", target=code, price=filled_price, reason="实盘成交确认", extra={"qty": filled_qty, "seq": oid})
+        
+        # 标记为已完成
+        PENDING_ORDERS[oid]['status'] = 'filled'
+
+    def on_order_error(self, response):
+        """委托被拒推送 — 交易所打回来的真实错误。"""
+        oid = response.order_id
+        if oid not in PENDING_ORDERS:
+            return
+            
+        code = PENDING_ORDERS[oid]['code']
+        name = PENDING_ORDERS[oid]['name']
+        err_msg = getattr(response, 'error_msg', '未知原因')
+        err_id  = getattr(response, 'error_id', -1)
+        
+        msg = (
+            f"❌ [Sniper 委托被拒]\n"
+            f"目标: {name}({code})\n"
+            f"错误码: {err_id}\n"
+            f"错误信息: {err_msg}\n"
+            f"订单号: {oid}"
+        )
+        print(msg)
+        send_n8n_alert("🚨 Sniper 委托被拒", msg)
+        record_action(strategy="Sniper", action="挂单失败", target=code, price=0, reason=err_msg, extra={"seq": oid})
+        
+        # 标记为已出错
+        PENDING_ORDERS[oid]['status'] = 'error'
+
+
+def execute_sniper_entry(xt_trader, acc):
+    LOCK_FILE = os.path.join(os.path.dirname(TARGETS_FILE), "sniper_entry.lock")
+    if not acquire_lock_with_ttl(LOCK_FILE): return
+
+    try:
+        # ── 0. 物理锁：避险周期 ───
+        if not is_trading_safe_zone():
+            return
+
+        if not os.path.exists(TARGETS_FILE):
+            print("❌ 找不到雷达目标，Sniper 放弃行动。")
+            return
+
+        with open(TARGETS_FILE, 'r', encoding='utf-8') as f:
+            targets = json.load(f)
+
+        # 获取文件修改日期，确保是今天的研报
+        mtime = os.path.getmtime(TARGETS_FILE)
+        file_date = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
+        today_date = datetime.now().strftime('%Y-%m-%d')
+
+        if file_date != today_date:
+            msg = f"🛑 Sniper 终止：目标文件日期 ({file_date}) 不是今天 ({today_date})。雷达可能扫描失败或未启动。"
+            print(msg)
+            send_n8n_alert("🚨 Sniper 启动失败", msg)
+            return
+
+        if not targets:
+            print("📭 观察池为空，暂无狙击信号。")
+            return
+
+        # ── 1. 龙一龙二分仓逻辑 ───
+        capital_per_target = SNIPER_TOTAL_CAPITAL / TARGET_COUNT
+        filled_count = 0
+
+        # 读取已有持仓，避免本程序内重复
+        holdings = {}
+        if os.path.exists(HOLDINGS_FILE):
+            try:
+                with open(HOLDINGS_FILE, 'r', encoding='utf-8') as f:
+                    holdings = json.load(f)
+            except: pass
+
+        # ── 2. 流动性探测与递补逻辑 ───
+        for target in targets:
+            if filled_count >= TARGET_COUNT:
+                break
+
+            code = target.get('code')
+            name = target.get('name', code)
+
+            if code in holdings:
+                print(f"⚠️ [{code}] 已有持仓记录，跳过探测。")
+                continue
+
+            tick_data = xtdata.get_full_tick([code])
+            if code not in tick_data:
+                print(f"❌ [{code}] 无法获取实时行情，跳过。")
+                continue
+
+            tick   = tick_data[code]
+            ask1   = tick.get('askPrice', [0])[0]
+            bid1   = tick.get('bidPrice', [0])[0]
+            volume = tick.get('volume', 0)
+            
+            instr_detail = xtdata.get_instrument_detail(code) or {}
+            up_limit = instr_detail.get('UpLimit', 0)
+
+            if volume == 0:
+                print(f"🚧 [{code}] 暂无成交量 (可能临停或死水)，寻找替补...")
+                continue
+
+            if ask1 <= 0 or (up_limit > 0 and ask1 >= up_limit):
+                print(f"🔒 [{code}] 涨停死锁 (ask={ask1})，无法买入，寻找替补...")
+                continue
+
+            buy_price = round(ask1 * 1.01, 2)
+            if up_limit > 0 and buy_price > up_limit:
+                buy_price = up_limit
+
+            buy_qty = math.floor((capital_per_target / buy_price) / 100) * 100
+
+            if buy_qty < 100:
+                print(f"⚠️ [{code}] 剩余资金不足以购买一手，向后搜索。")
+                continue
+
+            print(f"🔫 [Sniper 拔枪] 目标: {name}({code}) | 分仓买入: {buy_qty} 股")
+            
+            # 🛡️ 发单并追踪
+            seq = safe_execute_and_lock(
+                xt_trader, acc, code, xtconstant.STOCK_BUY,
+                buy_qty, buy_price, 'Sniper_V1', 'SniperBuy'
+            )
+
+            if seq > 0:
+                filled_count += 1
+                PENDING_ORDERS[seq] = {
+                    'code': code, 'name': name, 'qty': buy_qty, 'price': buy_price, 'status': 'pending'
+                }
+                print(f"🚀 [Sniper] {name} 委托已发送 | 单号: {seq} | 等待成交确认...")
+            
+            time.sleep(0.5)
+
+        # ── 3. 等待所有报单完成 (超时 30 秒) ───
+        if filled_count > 0:
+            print(f"\n⏳ 正在监视 {filled_count} 笔 Sniper 委托，等待实盘成交回报...")
+            timeout = 30
+            start_wait = time.time()
+            while time.time() - start_wait < timeout:
+                all_done = all(info['status'] != 'pending' for info in PENDING_ORDERS.values())
+                if all_done: break
+                time.sleep(1)
+            
+            for oid, info in PENDING_ORDERS.items():
+                if info['status'] == 'pending':
+                    print(f"⚠️ [Sniper 确认超时] 单号 {oid} ({info['name']}) 仍处于待定状态，请手动核实实盘。")
+
+        if filled_count == 0:
+            print("🏁 Sniper 全轮扫描结束，未能撮合任何有效目标。")
+        else:
+            print(f"🏁 Sniper 任务执行完毕，共计出击 {filled_count} 次。")
+    finally:
+        release_lock(LOCK_FILE)
+
+
+if __name__ == "__main__":
+    acc_id   = os.getenv("ACCOUNT_ID")
+    qmt_path = os.getenv("QMT_PATH")
+
+    if not acc_id or not qmt_path:
+        print("❌ 环境变量缺失 ACCOUNT_ID 或 QMT_PATH")
+    else:
+        session_id = random.randint(100000, 999999)
+        xt_trader = XtQuantTrader(qmt_path, session_id)
+        xt_trader.start()
+        time.sleep(5)  # xtquant 规范：start() 后必须等待 ≥3秒再 connect()
+        res = xt_trader.connect()
+        if res == 0:
+            # ── 注册 Sniper 专属回调 ──
+            from xtquant.xttype import StockAccount
+            acc = StockAccount(acc_id)          # 必须先建账户对象
+            xt_trader.register_callback(SniperCallback())
+            xt_trader.subscribe(acc)            # 再订阅，才能接收回调
+            execute_sniper_entry(xt_trader, acc)
+            
+            # 停止前额外等待几秒，确保日志刷完
+            time.sleep(2)
+            xt_trader.stop()
+        else:
+            print("❌ QMT 链路连接失败，请确认 MiniQMT 已启动。")

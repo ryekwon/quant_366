@@ -1,0 +1,72 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/*.log
+*.log
+
+# Data files (避免提交大数据文件)
+*.parquet
+*.csv
+*.h5
+*.hdf5
+
+# OS
+.DS_Store
+Thumbs.db
+
+# UV
+.uv/
+uv.lock
+# =========================================
+# 🛡️ Quant-Pilot 核心业务物理防线 (手动追加)
+# =========================================
+
+# 1. 状态机与动态账本（绝对禁入云端，交给 VM 物理切片）
+.state/
+
+# 2. 券商机密与环境密钥（防止资金池裸奔）
+secret*.yaml
+secret*.json
+account_info.json
+.env
+*.key
+
+# 3. 游离在 .state 之外的动态槽位（如果有的话，斩草除根）
+*_slots.yaml
+*_signals.json
+
+#图片
+.png

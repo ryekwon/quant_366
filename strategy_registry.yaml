@@ -1,0 +1,91 @@
+﻿# =====================================================
+# strategy_registry.yaml — Auto Pilot 策略插件注册表
+# 修改 enabled: false 可在不重启调度引擎的情况下暂停策略
+# =====================================================
+
+hunter_strategies:
+  # 09:18 猎犬选股（先于网格启动，生成 grid_targets.yaml 供网格使用）
+  - name: "T0精选暴破"
+    script: "t0_master.py"
+    enabled: true
+    wait: true
+    description: "T0 Master — 在 09:25 分进行高精度溢价筛选与 ATR 选拔，生成最终 grid_targets.yaml"
+
+morning_strategies:
+  # 09:20 早盘策略（按顺序启动，Popen 非阻塞）
+  - name: "T0多网格引擎"
+    script: "t0_multigrid_executor.py"
+    enabled: true
+    watchdog: true      # 看门狗保护：崩溃后自动复活，最多重试 5 次
+    description: "天罗地网 V3.3 — 动态等权网格做市，自动低吸高抛，最大化 T0 收益"
+
+  - name: "Sniper 冷血退出卫士"
+    script: "sniper_exit_guard.py"
+    enabled: true
+    watchdog: true
+    description: "实时监控持仓盈亏，执行机械化止损与动态止盈，确保利润不回吐"
+
+  - name: "胖鱼波段防线"
+    script: "fat_fish_guard.py"
+    enabled: true
+    watchdog: true      # 看门狗保护：崩溃后自动复活，止损防线不允许中断
+    description: "0.5s 轮询所有槽位的 stop_loss_price，击穿即市价斩仓，实时 ATR 动态防线"
+
+  - name: "Hawkes 刺客执行器"
+    script: "hawkes_executor.py"
+    enabled: true
+    watchdog: true      # 看门狗保护：Tick 桥接进程崩溃后自动复活
+    description: "Hawkes 点过程大单流涌现探测，10000元侦察弹追击，+15元止盈/-30元止损"
+
+  - name: "落水狗抄底执行器"
+    script: "underdog_executor.py"
+    enabled: true
+    watchdog: true      # 看门狗保护：四维退出防线盘中不允许中断
+    description: "三维共振扫描(14:45尾盘唤醒一次) + 四维退出矩阵(09:30-14:55盘中30s高频巡逻)，固定5万资金"
+
+closing_strategies:
+  # 14:40 胖鱼波段大脑（先于进场执行器，生成 fat_fish_orders.yaml / fat_fish_slots.yaml）
+  - name: "胖鱼波段大脑"
+    script: "fat_fish_master.py"
+    enabled: true
+    wait: true            # 必须等待大脑计算完毕，执行器才能消费 orders 文件
+    description: "Fat Fish Master — 重算止损线 / 横截面突破选股 / 生成明日指令"
+
+  # 14:48 尾盘狙击序列（通常由任务调度器触发，也可在此注册供手动拉起）
+  - name: "20CM 游资雷达"
+    script: "sniper_v5.1.py"
+    enabled: false      # ⚠️ 已退役：sniper_entry_executor V2 自带全市场扫描，不再依赖此雷达
+    wait: true
+    description: "【已废弃】旧版仅扫描创业板并写 sniper_targets.json，新版执行器已内置全市场扫描"
+
+  - name: "胖鱼火炮"
+    script: "fat_fish_executor.py"
+    enabled: true
+    wait: false         # 非阻塞：发完单就退出，不占用主线程
+    description: "Fat Fish Executor — 读取 fat_fish_orders.yaml，尾盘发送买卖指令"
+
+  - name: "Sniper 机械化进场"
+    script: "sniper_entry_executor.py"
+    enabled: true
+    watchdog: false
+    description: "执行尾盘最后 10 分钟的批量挂单进场"
+
+  - name: "StatArb 统计套利执行器"
+    script: "stat_arb_executor.py"
+    enabled: false
+    watchdog: false
+    description: "基于 Z-Score 的配对交易均值回归执行"
+
+rotation_strategies:
+  # [已停用] 旧 ETF 轮动 — 已切换为 macro_rotation_executor.py (rotation_v2)
+  - name: "ETF 轮动信号机"
+    script: "etf_rotation_master.py"
+    enabled: false   # ⚠️ 2026-04-10 停用：已切换为 macro_rotation_executor.py
+    wait: true
+    description: "【已停用】Sharpe Momentum + MA120 过滤，旧版轮动信号生成器"
+
+  - name: "ETF 调仓执行器"
+    script: "etf_rotation_executor.py"
+    enabled: false   # ⚠️ 2026-04-10 停用：已切换为 macro_rotation_executor.py
+    wait: false
+    description: "【已停用】旧版 ETF 实盘调仓，保护 T0 底仓"
