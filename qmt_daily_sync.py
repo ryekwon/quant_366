@@ -9,10 +9,12 @@ import os
 import time
 from datetime import datetime, timedelta
 import re
+from dotenv import load_dotenv
+load_dotenv()
 
 # ================= 核心配置区 =================
-NVME_PATH = r"Z:\QuantpC_Workspace\Data\Market_Daily"
-MASTER_CSV = r"Z:\QuantpC_Workspace\Data\instrument_master.csv"
+NVME_PATH  = os.getenv("DATA_DIR",   r"Z:\QuantpC_Workspace\Data\Market_Daily")   # 从 .env 读取
+MASTER_CSV = os.getenv("MASTER_CSV", r"Z:\QuantpC_Workspace\Data\instrument_master.csv")  # 从 .env 读取
 BATCH_SIZE = 500
 # ==============================================
 

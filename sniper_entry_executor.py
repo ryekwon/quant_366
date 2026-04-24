@@ -35,15 +35,17 @@ def send_n8n_alert(title, message):
     except Exception:
         pass
 
-# 物理路径配置
-TARGETS_FILE = r"Z:\QuantpC_Workspace\Quant_Pilot\.state\sniper_targets.json"
-HOLDINGS_FILE = r"Z:\QuantpC_Workspace\Quant_Pilot\.state\sniper_holdings.json"
+# 物理路径配置（基于 __file__ 动态定位，避免硬编码机器路径）
+_PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+STATE_DIR_BASE = os.getenv("STATE_DIR", os.path.join(_PROJECT_ROOT, ".state"))
+TARGETS_FILE = os.path.join(STATE_DIR_BASE, "sniper_targets.json")
+HOLDINGS_FILE = os.path.join(STATE_DIR_BASE, "sniper_holdings.json")
 SNIPER_TOTAL_CAPITAL = 1000       # 绝对火力上限：10万元
 TARGET_COUNT = 2              # 取前 2 名动量最强标的
 APPROACH_RATE_THRESHOLD = 0.6    # 逼近率门槛：60%（未封死涨停才可买）
 
 # ── 遥测 CSV（与 exit_guard 共享同一文件，event_type 区分）──────
-_SNIPER_STATE_DIR  = r"Z:\QuantpC_Workspace\Quant_Pilot\.state"
+_SNIPER_STATE_DIR  = STATE_DIR_BASE
 _SNIPER_TELEM_FILE = os.path.join(_SNIPER_STATE_DIR, "sniper_telemetry.csv")
 _SNIPER_TELEM_LOCK = threading.Lock()
 _SNIPER_TELEM_FIELDS = [

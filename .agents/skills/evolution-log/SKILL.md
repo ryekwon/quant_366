@@ -40,6 +40,50 @@ description: 记录量化交易系统的每日代码变更、逻辑重构与架�
 
 **验证**：`py_compile underdog_executor.py` → **Exit 0**
 
+---
+
+## 📅 2026-04-24 — 安全加固：物理路径与账户配置全量 .env 化（GitHub 泄露风险清除）
+
+### 变更文件：8 个核心 .py 文件
+
+**[OPS] 铁律执行：物理路径与账户配置从 .env 读取，禁止硬编码**
+
+用户将代码推送到 GitHub 后发现以下硬编码敏感信息在代码中裸露，本次全量修复：
+
+#### 修复清单
+
+| 文件 | 硬编码内容 | 修复方式 |
+|------|-----------|---------|
+| `macro_rotation_executor.py:33-34` | `QMT_PATH` 硬编码 + `ACCOUNT_ID="8887070833"` | `os.getenv("QMT_PATH")` + `os.getenv("ACCOUNT_ID", "")` |
+| `hawkes_executor.py:83-84` | `QMT_PATH` 硬编码 + `ACCOUNT_ID="8887070833"` | `os.getenv("QMT_PATH")` + `os.getenv("ACCOUNT_ID", "")` |
+| `emergency_liquidation.py:22-23` | `QMT_PATH` 硬编码 + fallback 含明文账号 | `os.getenv("QMT_PATH")` + `os.getenv("ACCOUNT_ID", "")` 去掉明文 fallback |
+| `sniper_entry_executor.py:39-46` | `TARGETS_FILE`/`HOLDINGS_FILE`/`_SNIPER_STATE_DIR` 硬编码绝对路径 | `os.path.dirname(os.path.abspath(__file__))` 动态定位 + `os.getenv("STATE_DIR", ...)` |
+| `sniper_exit_guard.py:31-32,343` | `HOLDINGS_FILE`/`LOCK_FILE`/`T0_STATE_FILE` 硬编码绝对路径 | 同上，`_PROJECT_ROOT` + `_STATE_BASE` 动态定位 |
+| `qmt_daily_sync.py:14-15` | `NVME_PATH`/`MASTER_CSV` 硬编码 `Z:\` 路径 | `os.getenv("DATA_DIR")` + `os.getenv("MASTER_CSV")` + 增加 `load_dotenv()` |
+| `qmt_1m_downloader.py:23` | `SAVE_DIR` 硬编码 `Z:\` 路径 | 从 `DATA_DIR` env 变量动态推导 `Market_Minute` 子目录 + 增加 `load_dotenv()` |
+| `t0_master.py:28-31,48` | `MINUTE_DATA_DIR`/`MASTER_CSV`/`OUTPUT_CSV`/`FINAL_YAML`/`FIXED_T0_FILE` 全部硬编码 | `os.getenv("DATA_DIR")` 动态推导 + `os.getenv("STATE_DIR")` |
+| `tools/fix_sniper_holdings.py:11` | `HOLDINGS_FILE` 硬编码绝对路径 | `os.path.dirname(dirname(__file__))` 两级回溯到项目根 |
+
+#### 新增文件
+
+- **`.env.example`**（[NEW]）：安全模板，所有真实值替换为占位符，供 GitHub 展示配置规范
+
+#### .env 文件状态
+
+`.env` 已在 `.gitignore` 中保护，包含所有必要变量：
+- `QMT_PATH` / `QMT_EXE_PATH` / `ACCOUNT_ID` / `QMT_PASSWORD` / `RESET_TOKEN`
+- `N8N_WEBHOOK_URL`
+- `DATA_DIR` / `MASTER_CSV` / `STATE_DIR` / `GRID_TARGETS_FILE` / `SNIPER_OUTPUT_FILE`
+
+#### 设计原则
+
+- `fallback` 值仅保留**物理路径**（机器本地路径），**绝不**在代码中保留账号/密码 fallback
+- `.state/` 目录内文件统一改为基于 `__file__` 动态定位，彻底消除 `Z:\` 硬编码
+- `tools/` 子目录脚本使用 `dirname(dirname(__file__))` 两级回溯到项目根
+
+**验证**：所有修改文件 `py_compile` → **Exit 0**（共 9 个文件全部通过）
+
+
 ### 变更文件：`macro_rotation_executor.py`（Fill-Based 原子记账重构）
 
 **[ARCH] 复刻 T0 on_order_trade 模式到 MacroRotation**

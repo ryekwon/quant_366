@@ -80,8 +80,8 @@ from hawkes_engine import FastHawkesEngine   # O(1) λ 指数衰减解算器
 # ==============================================================================
 
 # ── QMT 连接 ─────────────────────────────────────────────────
-QMT_PATH   = r"C:\国金证券QMT交易端\userdata_mini"
-ACCOUNT_ID = "8887070833"
+QMT_PATH   = os.getenv("QMT_PATH", r"C:\国金证券QMT交易端\userdata_mini")  # 从 .env 读取
+ACCOUNT_ID = os.getenv("ACCOUNT_ID", "")                                     # 从 .env 读取，禁止硬编码
 N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "")
 
 # ── 标的白名单（严格锁定 T+0 跨境/商品 ETF）────────────────

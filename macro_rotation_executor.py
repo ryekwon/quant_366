@@ -30,8 +30,8 @@ from xtquant.xttype import StockAccount          # ✅ StockAccount 必须从 xt
 # ==============================================================================
 # 📌 全局配置
 # ==============================================================================
-QMT_PATH      = r"C:\国金证券QMT交易端\userdata_mini"
-ACCOUNT_ID    = "8887070833"
+QMT_PATH      = os.getenv("QMT_PATH", r"C:\国金证券QMT交易端\userdata_mini")  # 从 .env 读取
+ACCOUNT_ID    = os.getenv("ACCOUNT_ID", "")                                     # 从 .env 读取，禁止硬编码
 STATE_DIR     = ".state"
 SLOTS_FILE    = os.path.join(STATE_DIR, "macro_slots.json")
 

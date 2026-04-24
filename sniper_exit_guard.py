@@ -28,8 +28,10 @@ if sys.stdout.encoding.lower() != 'utf-8':
 
 load_dotenv()
 
-HOLDINGS_FILE   = r"Z:\QuantpC_Workspace\Quant_Pilot\.state\sniper_holdings.json"
-LOCK_FILE       = r"Z:\QuantpC_Workspace\Quant_Pilot\.state\sniper_exit.lock"
+_PROJECT_ROOT   = os.path.dirname(os.path.abspath(__file__))
+_STATE_BASE     = os.getenv("STATE_DIR", os.path.join(_PROJECT_ROOT, ".state"))
+HOLDINGS_FILE   = os.path.join(_STATE_BASE, "sniper_holdings.json")
+LOCK_FILE       = os.path.join(_STATE_BASE, "sniper_exit.lock")
 N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL")
 
 TAKE_PROFIT = 1.05  # +5%
@@ -340,7 +342,7 @@ def reconcile_positions_with_real(xt_trader, account, local_json_path):
     updated_state = {}
 
     # 获取 T0 的状态文件，避免把 T0 的标的误抓进 Sniper
-    T0_STATE_FILE = r"Z:\QuantpC_Workspace\Quant_Pilot\.state\grid_state.json"
+    T0_STATE_FILE = os.path.join(_STATE_BASE, "grid_state.json")
     t0_codes = []
     if os.path.exists(T0_STATE_FILE):
         try:

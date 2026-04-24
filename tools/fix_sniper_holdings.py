@@ -8,7 +8,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-HOLDINGS_FILE = r"Z:\QuantpC_Workspace\Quant_Pilot\.state\sniper_holdings.json"
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # tools/.. = 项目根
+_STATE_BASE   = os.getenv("STATE_DIR", os.path.join(_PROJECT_ROOT, ".state"))
+HOLDINGS_FILE = os.path.join(_STATE_BASE, "sniper_holdings.json")
 QMT_PATH = os.getenv("QMT_PATH")
 ACC_ID = os.getenv("ACCOUNT_ID")
 

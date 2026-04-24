@@ -19,16 +19,26 @@ import warnings
 warnings.filterwarnings('ignore')
 
 try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+try:
     from xtquant import xtdata
     _HAS_XTDATA = True
 except ImportError:
     _HAS_XTDATA = False
 
+_PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+
 # ================= 物理路径与全局参数 =================
-MINUTE_DATA_DIR = r"Z:\QuantpC_Workspace\Data\Market_Minute"
-MASTER_CSV      = r"Z:\QuantpC_Workspace\Data\instrument_master.csv"
-OUTPUT_CSV      = r"Z:\QuantpC_Workspace\Data\t0_optimal_parameters.csv"
-FINAL_YAML      = r"Z:\QuantpC_Workspace\Quant_Pilot\.state\grid_targets.yaml"
+_DATA_ROOT      = os.getenv("DATA_DIR",    r"Z:\QuantpC_Workspace\Data\Market_Daily")
+MINUTE_DATA_DIR = os.path.join(os.path.dirname(_DATA_ROOT), "Market_Minute")
+MASTER_CSV      = os.getenv("MASTER_CSV",  r"Z:\QuantpC_Workspace\Data\instrument_master.csv")
+OUTPUT_CSV      = os.path.join(os.path.dirname(_DATA_ROOT), "t0_optimal_parameters.csv")
+_STATE_DIR      = os.getenv("STATE_DIR",   os.path.join(_PROJECT_ROOT, ".state"))
+FINAL_YAML      = os.path.join(_STATE_DIR, "grid_targets.yaml")
 
 COMMISSION_RATE = 0.00005
 MIN_COMMISSION = 0.5
@@ -45,7 +55,7 @@ MIN_BARS = 12000
 ATR_MULTIPLIERS = [0.2, 0.3, 0.5, 0.8, 1.2, 1.5]
 
 # ================= 模块 0：固定 T0 标的池（从 fixed_t0_target.yaml 读取）=================
-FIXED_T0_FILE = r"Z:\QuantpC_Workspace\Quant_Pilot\.state\fixed_t0_target.yaml"
+FIXED_T0_FILE = os.path.join(_STATE_DIR, "fixed_t0_target.yaml")
 SELECTED_ETF_COUNT = TARGET_ETF_COUNT
 
 def load_fixed_t0_pool() -> list:

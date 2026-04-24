@@ -19,8 +19,8 @@ from xtquant.xttrader import XtQuantTrader, XtQuantTraderCallback
 from xtquant.xttype import StockAccount
 
 # ── 配置 ──────────────────────────────────────────────────────────────────────
-QMT_PATH   = r"C:\国金证券QMT交易端\userdata_mini"
-ACCOUNT_ID = os.getenv("ACCOUNT_ID", "8887070833")
+QMT_PATH   = os.getenv("QMT_PATH", r"C:\国金证券QMT交易端\userdata_mini")  # 从 .env 读取
+ACCOUNT_ID = os.getenv("ACCOUNT_ID", "")                                     # 从 .env 读取，禁止硬编码
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
 

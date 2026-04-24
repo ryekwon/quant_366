@@ -11,6 +11,8 @@ import time
 import pandas as pd
 from xtquant import xtdata
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
+load_dotenv()
 
 # Windows GBK 终端兼容：强制 stdout 输出为 UTF-8
 if sys.stdout.encoding != 'utf-8':
@@ -20,7 +22,8 @@ if sys.stdout.encoding != 'utf-8':
 _DIR               = os.path.dirname(os.path.abspath(__file__))
 FIXED_TARGETS_PATH = os.path.join(_DIR, ".state", "fixed_t0_target.yaml")
 ORACLE_UNIVERSE    = os.path.join(_DIR, ".state", "oracle_v2_universe.json")
-SAVE_DIR           = r"Z:\QuantpC_Workspace\Data\Market_Minute"
+_DATA_ROOT         = os.getenv("DATA_DIR", r"Z:\QuantpC_Workspace\Data\Market_Daily")
+SAVE_DIR           = os.path.join(os.path.dirname(_DATA_ROOT), "Market_Minute")  # 从 .env 动态推导
 FULL_START_DATE    = '20230101'   # QMT 服务端最多返回近1年
 # ================================================
 
